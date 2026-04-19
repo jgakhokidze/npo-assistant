@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>NPO AI Assistant</title>
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <script src="https://cdn.botframework.com/botframework-webchat/latest/webchat.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #f5f5f5;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+    #header {
+      background: #4F46E5;
+      color: white;
+      padding: 10px 14px;
+      font-size: 14px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    #header img {
+      width: 24px;
+      height: 24px;
+      border-radius: 4px;
+    }
+    #status {
+      padding: 6px 14px;
+      font-size: 11px;
+      color: #666;
+      background: #fff;
+      border-bottom: 1px solid #e0e0e0;
+      flex-shrink: 0;
+    }
+    #webchat {
+      flex: 1;
+      overflow: hidden;
+    }
+    #error {
+      display: none;
+      padding: 20px;
+      color: #c00;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <img src="https://nposervices.sharepoint.com/teams/Software/Shared%20Documents/Outlook%20plug-in/icon-32.png" onerror="this.style.display='none'" />
+    NPO AI Assistant
+  </div>
+  <div id="status">Connecting to agent...</div>
+  <div id="webchat"></div>
+  <div id="error"></div>
+
+  <script>
+    const ENVIRONMENT_ID = 'ff62615e-8f09-4ef7-9a91-326535addb95';
+    const SCHEMA_NAME    = 'auto_agent_rDTLO';
+    const TOKEN_ENDPOINT = `https://powerva.microsoft.com/api/botmanagement/v1/directline/directlinetoken?api-version=2022-03-01-preview&environmentId=${ENVIRONMENT_ID}`;
+
+    Office.onReady(async () => {
+      const statusEl = document.getElementById('status');
+      const errorEl  = document.getElementById('error');
+
+      try {
+        // Get email subject to pre-fill greeting
+        let emailSubject = '';
+        try {
+          const item = Office.context.mailbox.item;
+          if (item && item.subject) {
+            emailSubject = typeof item.subject === 'string'
+              ? item.subject
+              : await new Promise(r => item.subject.getAsync(res => r(res.value)));
+          }
+        } catch(e) { /* not reading an email, that's fine */ }
+
+        // Fetch Direct Line token from Copilot Studio
+        statusEl.textContent = 'Authenticating...';
+        const res = await fetch(TOKEN_ENDPOINT, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (!res.ok) throw new Error(`Token fetch failed: ${res.status}`);
+        const { token } = await res.json();
+
+        statusEl.textContent = 'Connected ✓';
+        setTimeout(() => statusEl.style.display = 'none', 2000);
+
+        // Render webchat
+        WebChat.renderWebChat(
+          {
+            directLine: WebChat.createDirectLine({ token }),
+            userID: 'outlook-addin-user',
+            username: 'Outlook User',
+            locale: 'en-US',
+            sendTypingIndicator: true,
+            styleOptions: {
+              accent: '#4F46E5',
+              botAvatarBackgroundColor: '#4F46E5',
+              botAvatarInitials: 'AI',
+              userAvatarBackgroundColor: '#07687d',
+              userAvatarInitials: 'Me',
+              bubbleBackground: '#ffffff',
+              bubbleBorderRadius: 8,
+              bubbleFromUserBackground: '#4F46E5',
+              bubbleFromUserTextColor: '#ffffff',
+              bubbleFromUserBorderRadius: 8,
+              rootHeight: '100%',
+              rootWidth: '100%',
+              backgroundColor: '#f5f5f5',
+              hideScrollToEndButton: false,
+              sendBoxButtonColor: '#4F46E5',
+            }
+          },
+          document.getElementById('webchat')
+        );
+
+        // Auto-send email subject as first message if available
+        if (emailSubject) {
+          setTimeout(() => {
+            const store = WebChat.createStore({}, ({ dispatch }) => next => action => {
+              if (action.type === 'DIRECT_LINE/CONNECT_FULFILLED') {
+                dispatch({
+                  type: 'WEB_CHAT/SEND_MESSAGE',
+                  payload: { text: `Analyze this email: "${emailSubject}"` }
+                });
+              }
+              return next(action);
+            });
+          }, 500);
+        }
+
+      } catch (err) {
+        statusEl.style.display = 'none';
+        errorEl.style.display  = 'block';
+        errorEl.textContent    = `Could not connect: ${err.message}. Please ensure you are signed into Microsoft 365.`;
+        console.error(err);
+      }
+    });
+  </script>
+</body>
+</html>
